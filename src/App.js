@@ -11,6 +11,8 @@ function App() {
     return (
         <div>
 <Counter/>
+            <Counter/>
+            <Counter/>
             <h1>{value}</h1>
             <input type='text'
                    value={value}
