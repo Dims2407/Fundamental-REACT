@@ -30,29 +30,21 @@ jobs:
           wait-on: 'http://localhost:3000'
           browser: chrome
 
-     - name: Parse test results and send
-              if: always()
-              env:
-                BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-                CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-              run: |
-                # Создаем сообщение
-                MESSAGE="🧪 <b>Cypress Tests Report</b>
-                ========================
-                📦 Repository: ${{ github.repository }}
-                🌿 Branch: ${{ github.ref_name }}
-                👤 Author: ${{ github.actor }}
-                📊 Result: ${{ job.status == 'success' && '✅ PASSED' || '❌ FAILED' }}
-                ------------------------
-                📝 Summary: "
-
-                # Если есть файл с результатами
-                if [ -f "cypress/results/results.json" ]; then
-                  TESTS_TOTAL=$(jq '.total' cypress/results/results.json)
-                  TESTS_PASSED=$(jq '.passed' cypress/results/results.json)
-                  MESSAGE="$MESSAGE\n✅ $TESTS_PASSED/$TESTS_TOTAL tests passed"
-                fi
-
-                MESSAGE="$MESSAGE
-                ------------------------
-                🔗 Details: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+  - name: Send Telegram notification
+    if: always() # Отправлять всегда, даже если тесты упали
+    uses: appleboy/telegram-action@master
+    with:
+      to: ${{ secrets.TELEGRAM_CHAT_ID }}
+      token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      message: |
+        🧪 Cypress Tests Results
+        ========================
+        Repository: ${{ github.repository }}
+        Branch: ${{ github.ref_name }}
+        Commit: ${{ github.sha }}
+        Author: ${{ github.actor }}
+        Status: ${{ job.status }}
+        Workflow: ${{ github.workflow }}
+        Result: ${{ job.status == 'success' && '✅ PASSED' || '❌ FAILED' }}
+        ------------------------
+        View Details: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
