@@ -22,29 +22,83 @@ jobs:
         env:
           CI: false
 
-      - name: Run Cypress tests
+      - name: Install jq for JSON parsing
+        run: sudo apt-get install -y jq  # ⬅️ Установка jq
+
+      - name: Run Cypress tests with JSON report
         uses: cypress-io/github-action@v6
         with:
           build: npm run build
           start: npm start
           wait-on: 'http://localhost:3000'
           browser: chrome
+          command: npm run test:e2e  # ⬅️ Используем ваш новый скрипт
 
-      - name: Send Telegram notification
+      - name: Send detailed Telegram notification
         if: always()
-        uses: appleboy/telegram-action@master
-        with:
-          to: ${{ secrets.TELEGRAM_CHAT_ID }}
-          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          message: |
-            🧪 Cypress Tests Results
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          # Проверяем наличие файла результатов
+          if [ -f "cypress/results/results.json" ]; then
+            # Парсим результаты тестов
+            TESTS_TOTAL=$(jq -r '.total' cypress/results/results.json)
+            TESTS_PASSED=$(jq -r '.passed' cypress/results/results.json)
+            TESTS_FAILED=$(jq -r '.failed' cypress/results/results.json)
+          
+            # Формируем сообщение
+            MESSAGE="🧪 <b>Детальный отчет Cypress Tests</b>
+            ==============================
+            📦 Репозиторий: ${{ github.repository }}
+            🌿 Ветка: ${{ github.ref_name }}
+            👤 Автор: ${{ github.actor }}
+          
+            📊 <b>Результаты тестов:</b>
+            ✅ Пройдено: $TESTS_PASSED из $TESTS_TOTAL
+            ❌ Упало: $TESTS_FAILED из $TESTS_TOTAL"
+          
+            # Добавляем прогресс-бар
+            PERCENTAGE=$((TESTS_PASSED * 100 / TESTS_TOTAL))
+            MESSAGE="$MESSAGE
+            📈 Прогресс: [$(
+              for i in $(seq 1 10); do
+                if [ $((i*10)) -le $PERCENTAGE ]; then
+                  echo "█"
+                else
+                  echo "░"
+                fi
+              done | tr -d '\n'
+            )] $PERCENTAGE%"
+          
+            if [ $TESTS_FAILED -gt 0 ]; then
+              # Получаем список упавших тестов
+              FAILED_TESTS=$(jq -r '.failures[] | .title' cypress/results/results.json 2>/dev/null || echo "Не удалось получить список")
+              MESSAGE="$MESSAGE
+          
+            🔥 <b>Упавшие тесты:</b>
+            $FAILED_TESTS"
+            fi
+          
+          else
+            # Если файла с результатами нет
+            MESSAGE="🧪 <b>Cypress Tests Results</b>
             ========================
-            Repository: ${{ github.repository }}
-            Branch: ${{ github.ref_name }}
-            Commit: ${{ github.sha }}
-            Author: ${{ github.actor }}
-            Status: ${{ job.status }}
-            Workflow: ${{ github.workflow }}
-            Result: ${{ job.status == 'success' && '✅ PASSED' || '❌ FAILED' }}
-            ------------------------
-            View Details: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            📦 Репозиторий: ${{ github.repository }}
+            🌿 Ветка: ${{ github.ref_name }}
+          
+            ⚠️ Файл с результатами не найден
+            Статус: ${{ job.status }}"
+          fi
+          
+          MESSAGE="$MESSAGE
+          
+          ------------------------
+          🔗 Детали: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          
+          # Отправляем сообщение в Telegram
+          curl -s -X POST \
+            https://api.telegram.org/bot$BOT_TOKEN/sendMessage \
+            -d chat_id=$CHAT_ID \
+            -d text="$MESSAGE" \
+            -d parse_mode="HTML"
