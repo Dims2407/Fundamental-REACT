@@ -51,79 +51,71 @@ jobs:
           ls -la cypress/results/*.json 2>/dev/null || echo "JSON файлов нет"
 
       - name: Send Telegram notification
-          if: always()
-          env:
-            BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-            CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-            GITHUB_BRANCH: ${{ github.ref_name }}
-            GITHUB_ACTOR: ${{ github.actor }}
-            GITHUB_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-            JOB_STATUS: ${{ job.status }}
-          run: |
-            echo "=== Начинаем отправку уведомления ==="
-            
+        if: always()
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GITHUB_BRANCH: ${{ github.ref_name }}
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          echo "=== Начинаем отправку уведомления ==="
+          
+          if [ -f "cypress/results/combined-report.json" ]; then
+            echo "✅ Найден combined-report.json"
+          
+            TOTAL_TESTS=$(jq '.stats.tests // 0' cypress/results/combined-report.json)
+            PASSED_TESTS=$(jq '.stats.passes // 0' cypress/results/combined-report.json)
+            FAILED_TESTS=$(jq '.stats.failures // 0' cypress/results/combined-report.json)
+            PENDING_TESTS=$(jq '.stats.pending // 0' cypress/results/combined-report.json)
+          
+            echo "Статистика: Total=$TOTAL_TESTS, Passed=$PASSED_TESTS, Failed=$FAILED_TESTS"
+          
+            if [ "$FAILED_TESTS" -eq 0 ]; then
+              STATUS_ICON="✅"
+              STATUS_TEXT="Все тесты прошли успешно!"
+            else
+              STATUS_ICON="❌"
+              STATUS_TEXT="Обнаружены упавшие тесты!"
+            fi
+          
             # Формируем сообщение по частям
-            MESSAGE_PART1=""
-            MESSAGE_PART2=""
-            
-            if [ -f "cypress/results/combined-report.json" ]; then
-              echo "✅ Найден combined-report.json"
-            
-              TOTAL_TESTS=$(jq '.stats.tests // 0' cypress/results/combined-report.json)
-              PASSED_TESTS=$(jq '.stats.passes // 0' cypress/results/combined-report.json)
-              FAILED_TESTS=$(jq '.stats.failures // 0' cypress/results/combined-report.json)
-              PENDING_TESTS=$(jq '.stats.pending // 0' cypress/results/combined-report.json)
-            
-              echo "Статистика: Total=$TOTAL_TESTS, Passed=$PASSED_TESTS, Failed=$FAILED_TESTS"
-            
-              if [ "$FAILED_TESTS" -eq 0 ]; then
-                STATUS_ICON="✅"
-                STATUS_TEXT="Все тесты прошли успешно!"
-              else
-                STATUS_ICON="❌"
-                STATUS_TEXT="Обнаружены упавшие тесты!"
-              fi
-            
-              MESSAGE_PART1="${STATUS_ICON} Cypress Tests Results
-      ========================
-      ${STATUS_TEXT}
-      ${PASSED_TESTS}/${TOTAL_TESTS} тестов пройдено"
-      
-      if [ "$FAILED_TESTS" -gt 0 ]; then
-      MESSAGE_PART1="${MESSAGE_PART1}
-      ${FAILED_TESTS} тестов упали"
-      fi
-      
-      if [ "$PENDING_TESTS" -gt 0 ]; then
-      MESSAGE_PART1="${MESSAGE_PART1}
-      ${PENDING_TESTS} тестов в ожидании"
-      fi
-      else
-      echo "❌ Файл combined-report.json не найден!"
-      MESSAGE_PART1="🧪 Cypress Tests Results
-      ========================
-      ⚠️ Отчет не сгенерирован или тесты не запущены
-      Статус выполнения: ${JOB_STATUS}"
-        fi
-
-        # Общая информация (Ветка, Автор, Ссылка)
-        MESSAGE_PART2="Ветка: ${GITHUB_BRANCH}
-      Автор: ${GITHUB_ACTOR}
-
-      Ссылка на лог: ${GITHUB_RUN_URL}"
-        
-        # Объединяем части сообщения
-        FULL_MESSAGE="${MESSAGE_PART1}
-      ${MESSAGE_PART2}"
-      
-      echo "Отправляем сообщение в Telegram..."
-      echo "Длина сообщения: ${#FULL_MESSAGE} символов"
-
-      # Отправляем в Telegram
-      curl -s -X POST \
-      https://api.telegram.org/bot${BOT_TOKEN}/sendMessage \
-      -d chat_id="${CHAT_ID}" \
-      --data-urlencode "text=${FULL_MESSAGE}" \
-      -d "parse_mode=HTML"
-      
-      echo "📤 Уведомление отправлено в Telegram"
+            MESSAGE="${STATUS_ICON} Cypress Tests Results"
+            MESSAGE="${MESSAGE}\n========================\n"
+            MESSAGE="${MESSAGE}${STATUS_TEXT}\n"
+            MESSAGE="${MESSAGE}${PASSED_TESTS}/${TOTAL_TESTS} тестов пройдено"
+          
+            if [ "$FAILED_TESTS" -gt 0 ]; then
+              MESSAGE="${MESSAGE}\n${FAILED_TESTS} тестов упали"
+            fi
+          
+            if [ "$PENDING_TESTS" -gt 0 ]; then
+              MESSAGE="${MESSAGE}\n${PENDING_TESTS} тестов в ожидании"
+            fi
+          
+          else
+            echo "❌ Файл combined-report.json не найден!"
+          
+            MESSAGE="🧪 Cypress Tests Results"
+            MESSAGE="${MESSAGE}\n========================\n"
+            MESSAGE="${MESSAGE}⚠️ Отчет не сгенерирован или тесты не запущены\n"
+            MESSAGE="${MESSAGE}Статус выполнения: ${JOB_STATUS}"
+          fi
+          
+          # Добавляем общую информацию
+          MESSAGE="${MESSAGE}\nВетка: ${GITHUB_BRANCH}"
+          MESSAGE="${MESSAGE}\nАвтор: ${GITHUB_ACTOR}"
+          MESSAGE="${MESSAGE}\n\nСсылка на лог: ${GITHUB_RUN_URL}"
+          
+          echo "Отправляем сообщение в Telegram..."
+          echo "Длина сообщения: ${#MESSAGE} символов"
+          
+          # Отправляем в Telegram
+          curl -s -X POST \
+            https://api.telegram.org/bot${BOT_TOKEN}/sendMessage \
+            -d chat_id="${CHAT_ID}" \
+            --data-urlencode "text=${MESSAGE}" \
+            -d "parse_mode=HTML"
+          
+          echo "📤 Уведомление отправлено в Telegram"
