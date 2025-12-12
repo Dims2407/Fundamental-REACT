@@ -34,52 +34,96 @@ jobs:
           browser: chrome
           command: npm run test:e2e  # ⬅️ Используем ваш новый скрипт
 
+      - name: Debug JSON structure
+          if: always()
+          run: |
+            echo "=== Полный путь к файлу ==="
+            pwd
+            find . -name "results.json" -type f
+            
+            echo "=== Проверяем папку cypress ==="
+            ls -la cypress/ 2>/dev/null || echo "Папка cypress не найдена"
+            ls -la cypress/results/ 2>/dev/null || echo "Папка results не найдена"
+            
+            echo "=== Содержимое results.json ==="
+            if [ -f "cypress/results/results.json" ]; then
+              echo "Размер файла: $(wc -l < "cypress/results/results.json") строк"
+              echo "Размер в байтах: $(wc -c < "cypress/results/results.json")"
+              echo "=== Первые 10 строк ==="
+              head -n 10 "cypress/results/results.json"
+              echo "=== Последние 10 строк ==="
+              tail -n 10 "cypress/results/results.json"
+              echo "=== Попытка парсинга через jq ==="
+              jq -r '.' "cypress/results/results.json" 2>/dev/null | head -n 50 || echo "jq не смог распарсить файл"
+              echo "=== Ключи в JSON ==="
+              jq -r 'keys[]' "cypress/results/results.json" 2>/dev/null || echo "Не удалось получить ключи"
+            else
+              echo "Файл cypress/results/results.json не найден!"
+              # Ищем другие возможные файлы
+              echo "=== Ищем все JSON файлы в проекте ==="
+              find . -name "*.json" -type f | grep -i "result\|report\|test" | head -20
+            fi
+
       - name: Send detailed Telegram notification
         if: always()
         env:
           BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          # Проверяем разные возможные пути к файлу результатов
-          RESULT_FILE=""
+          # Инициализируем переменные
+          TESTS_TOTAL=0
+          TESTS_PASSED=0
+          TESTS_FAILED=0
 
-          for file in "cypress/results/results.json" "cypress/reports/results.json" "test-results.json" "cypress.json"; do
-            if [ -f "$file" ]; then
-              RESULT_FILE="$file"
-              echo "Найден файл результатов: $RESULT_FILE"
-              break
+          # Проверяем наличие файла
+          if [ -f "cypress/results/results.json" ]; then
+            echo "Файл найден, пытаемся парсить..."
+
+            # Выводим первые 100 символов для отладки
+            echo "=== Первые 100 символов файла ==="
+            head -c 100 "cypress/results/results.json"
+            echo ""
+
+            # Пробуем разные варианты парсинга
+            # 1. Стандартный Cypress JSON отчет
+            if jq -e '.stats' "cypress/results/results.json" > /dev/null 2>&1; then
+              echo "Найдена структура .stats"
+              TESTS_TOTAL=$(jq -r '.stats.tests // 0' "cypress/results/results.json")
+              TESTS_PASSED=$(jq -r '.stats.passes // 0' "cypress/results/results.json")
+              TESTS_FAILED=$(jq -r '.stats.failures // 0' "cypress/results/results.json")
+
+            # 2. Альтернативная структура (массив)
+            elif jq -e '.[0]' "cypress/results/results.json" > /dev/null 2>&1; then
+              echo "Найдена структура массива"
+              TESTS_TOTAL=$(jq -r '[.[] | .stats.tests] | add // 0' "cypress/results/results.json")
+              TESTS_PASSED=$(jq -r '[.[] | .stats.passes] | add // 0' "cypress/results/results.json")
+              TESTS_FAILED=$(jq -r '[.[] | .stats.failures] | add // 0' "cypress/results/results.json")
+
+            # 3. Простая структура
+            else
+              echo "Пробуем простую структуру"
+              TESTS_TOTAL=$(jq -r '.total // .tests // 0' "cypress/results/results.json")
+              TESTS_PASSED=$(jq -r '.passed // .passes // 0' "cypress/results/results.json")
+              TESTS_FAILED=$(jq -r '.failed // .failures // 0' "cypress/results/results.json")
             fi
-          done
 
-          if [ -n "$RESULT_FILE" ]; then
-            echo "=== Содержимое JSON файла ==="
-            cat "$RESULT_FILE" | jq '.' | head -50
-
-            # Пробуем разные варианты парсинга структуры JSON
-            # Вариант 1: Стандартная структура mochawesome
-            TESTS_TOTAL=$(jq -r '.stats.tests // .total // 0' "$RESULT_FILE" 2>/dev/null || echo "0")
-            TESTS_PASSED=$(jq -r '.stats.passes // .passed // 0' "$RESULT_FILE" 2>/dev/null || echo "0")
-            TESTS_FAILED=$(jq -r '.stats.failures // .failed // 0' "$RESULT_FILE" 2>/dev/null || echo "0")
-
-            echo "Статистика: Всего=$TESTS_TOTAL, Пройдено=$TESTS_PASSED, Упало=$TESTS_FAILED"
-
-            # Если не удалось получить данные, пробуем альтернативный способ
-            if [ "$TESTS_TOTAL" = "0" ] || [ "$TESTS_TOTAL" = "null" ]; then
-              echo "Пробуем альтернативный парсинг..."
-              # Ищем в массиве результатов
-              TESTS_TOTAL=$(jq -r '[.[] | .stats.tests] | add // 0' "$RESULT_FILE" 2>/dev/null || echo "0")
-              TESTS_PASSED=$(jq -r '[.[] | .stats.passes] | add // 0' "$RESULT_FILE" 2>/dev/null || echo "0")
-              TESTS_FAILED=$(jq -r '[.[] | .stats.failures] | add // 0' "$RESULT_FILE" 2>/dev/null || echo "0")
-            fi
+            echo "Результаты парсинга: Всего=$TESTS_TOTAL, Пройдено=$TESTS_PASSED, Упало=$TESTS_FAILED"
           else
             echo "Файл результатов не найден"
-            TESTS_TOTAL="N/A"
-            TESTS_PASSED="N/A"
-            TESTS_FAILED="N/A"
           fi
 
-          # Формируем сообщение с проверкой значений
-          if [ "$TESTS_TOTAL" != "N/A" ] && [ "$TESTS_TOTAL" != "null" ] && [ "$TESTS_TOTAL" != "0" ]; then
+          # Проверяем, что значения числовые
+          TESTS_TOTAL=${TESTS_TOTAL:-0}
+          TESTS_PASSED=${TESTS_PASSED:-0}
+          TESTS_FAILED=${TESTS_FAILED:-0}
+
+          # Преобразуем в числа (на всякий случай)
+          TESTS_TOTAL=$((TESTS_TOTAL))
+          TESTS_PASSED=$((TESTS_PASSED))
+          TESTS_FAILED=$((TESTS_FAILED))
+
+          # Рассчитываем процент только если есть тесты
+          if [ $TESTS_TOTAL -gt 0 ]; then
             PERCENTAGE=$((TESTS_PASSED * 100 / TESTS_TOTAL))
             PROGRESS_BAR="$(
               for i in $(seq 1 10); do
@@ -93,8 +137,10 @@ jobs:
           else
             PERCENTAGE=0
             PROGRESS_BAR="░░░░░░░░░░"
+            TESTS_TOTAL="Нет данных"
           fi
 
+          # Формируем сообщение
           MESSAGE="🧪 <b>Детальный отчет Cypress Tests</b>
           ==============================
           📦 Репозиторий: ${{ github.repository }}
@@ -103,9 +149,41 @@ jobs:
 
           📊 <b>Результаты тестов:</b>
           ✅ Пройдено: $TESTS_PASSED из $TESTS_TOTAL
-          ❌ Упало: $TESTS_FAILED из $TESTS_TOTAL
+          ❌ Упало: $TESTS_FAILED из $TESTS_TOTAL"
+
+          if [ "$TESTS_TOTAL" != "Нет данных" ] && [ $TESTS_TOTAL -gt 0 ]; then
+            MESSAGE="$MESSAGE
 
           📈 Прогресс: [$PROGRESS_BAR] $PERCENTAGE%"
+          fi
+
+          # Добавляем упавшие тесты если есть
+          if [ $TESTS_FAILED -gt 0 ] && [ -f "cypress/results/results.json" ]; then
+            # Пытаемся получить имена упавших тестов
+            FAILED_TESTS=$(jq -r '
+              if .stats then
+                # Структура со stats
+                [.results[].suites[].tests[] | select(.fail == true) | .title] | join("\n")
+              elif .[0] then
+                # Массивовая структура
+                [.[].results[].suites[].tests[] | select(.state == "failed") | .title] | join("\n")
+              else
+                "Не удалось извлечь список тестов"
+              end
+            ' "cypress/results/results.json" 2>/dev/null || echo "Ошибка при получении списка")
+
+            if [ -n "$FAILED_TESTS" ] && [ "$FAILED_TESTS" != "" ]; then
+              MESSAGE="$MESSAGE
+
+          🔥 <b>Упавшие тесты:</b>
+          $FAILED_TESTS"
+            fi
+          fi
+
+          MESSAGE="$MESSAGE
+
+          ------------------------
+          🔗 Детали: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
           # Отправляем сообщение в Telegram
           curl -s -X POST \
