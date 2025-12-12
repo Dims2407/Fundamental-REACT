@@ -23,7 +23,7 @@ jobs:
           CI: false
 
       - name: Install jq for JSON parsing
-        run: sudo apt-get install -y jq  # ⬅️ Установка jq
+        run: sudo apt-get install -y jq  # ⬅ Установка jq
 
       - name: Run Cypress tests with JSON report
         uses: cypress-io/github-action@v6
