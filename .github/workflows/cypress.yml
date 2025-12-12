@@ -80,6 +80,7 @@ jobs:
               STATUS_TEXT="Обнаружены упавшие тесты!"
             fi
           
+            # Формируем сообщение с эмодзи
             MESSAGE="$STATUS_ICON Cypress Tests Results
   ========================
   $STATUS_TEXT
@@ -102,6 +103,7 @@ jobs:
 Статус выполнения: $JOB_STATUS"
   fi
   
+  # Добавляем общую информацию
   MESSAGE="$MESSAGE
 Ветка: $GITHUB_BRANCH
 Автор: $GITHUB_ACTOR
@@ -112,6 +114,7 @@ jobs:
   echo "Сообщение:"
   echo "$MESSAGE"
   
+  # Отправляем в Telegram
   curl -s -X POST \
   "https://api.telegram.org/bot$BOT_TOKEN/sendMessage" \
   -d "chat_id=$CHAT_ID" \
