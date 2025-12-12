@@ -4,6 +4,7 @@ on: [push, pull_request]
 jobs:
   cypress-run:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -22,112 +23,116 @@ jobs:
         env:
           CI: false
 
-      - name: Install jq for JSON parsing
-        run: sudo apt-get install -y jq
+      - name: Install jq and mochawesome reporter
+        run: |
+          sudo apt-get install -y jq
+          npm install -g mochawesome mochawesome-merge mochawesome-report-generator
 
-      - name: Run Cypress tests with JSON report
+      - name: Create results directory
+        run: mkdir -p cypress/results
+
+      - name: Run Cypress tests with proper reporting
         uses: cypress-io/github-action@v6
         with:
           build: npm run build
           start: npm start
           wait-on: 'http://localhost:3000'
           browser: chrome
-          command: npm run test:e2e
+          # Вариант 1: С mochawesome (лучший)
+          command: npx cypress run --reporter mochawesome --reporter-options reportDir=cypress/results,overwrite=true,html=false,json=true
+          # Или вариант 2: С json reporter
+          # command: npx cypress run --reporter json --reporter-options output=cypress/results/results.json
+        env:
+          NODE_OPTIONS: "--max-old-space-size=4096"
 
-      # ⬇️⬇️⬇️ ДОБАВЬТЕ ЭТОТ ШАГ ОТЛАДКИ ЗДЕСЬ ⬇️⬇️⬇️
-      - name: Debug JSON structure
+      - name: Process mochawesome results
         if: always()
         run: |
-          echo "=== Полный путь к файлу ==="
-          pwd
-          find . -name "results.json" -type f
+          echo "=== Проверяем сгенерированные файлы ==="
+          ls -la cypress/results/
           
-          echo "=== Проверяем папку cypress ==="
-          ls -la cypress/ 2>/dev/null || echo "Папка cypress не найдена"
-          ls -la cypress/results/ 2>/dev/null || echo "Папка results не найдена"
+          # Если используем mochawesome, файлы будут называться mochawesome.json или mochawesome_001.json и т.д.
+          # Объединяем все JSON файлы если их несколько
+          if ls cypress/results/mochawesome*.json 1> /dev/null 2>&1; then
+            echo "Найден mochawesome отчет"
+            # Объединяем все файлы в один
+            npx mochawesome-merge cypress/results/mochawesome*.json > cypress/results/combined.json
+            # Делаем копию для совместимости
+            cp cypress/results/combined.json cypress/results/results.json
+          fi
           
           echo "=== Содержимое results.json ==="
-          if [ -f "cypress/results/results.json" ]; then
-            echo "Размер файла: $(wc -l < "cypress/results/results.json") строк"
-            echo "Размер в байтах: $(wc -c < "cypress/results/results.json")"
-            echo "=== Первые 10 строк ==="
-            head -n 10 "cypress/results/results.json"
-            echo "=== Последние 10 строк ==="
-            tail -n 10 "cypress/results/results.json"
-            echo "=== Попытка парсинга через jq ==="
-            jq -r '.' "cypress/results/results.json" 2>/dev/null | head -n 50 || echo "jq не смог распарсить файл"
-            echo "=== Ключи в JSON ==="
-            jq -r 'keys[]' "cypress/results/results.json" 2>/dev/null || echo "Не удалось получить ключи"
+          if [ -f "cypress/results/results.json" ] && [ -s "cypress/results/results.json" ]; then
+            echo "Файл не пустой"
+            echo "Размер: $(wc -c < cypress/results/results.json) байт"
+            echo "Первые 200 символов:"
+            head -c 200 cypress/results/results.json
+            echo ""
           else
-            echo "Файл cypress/results/results.json не найден!"
-            # Ищем другие возможные файлы
-            echo "=== Ищем все JSON файлы в проекте ==="
-            find . -name "*.json" -type f | grep -i "result\|report\|test" | head -20
+            echo "Файл пустой или отсутствует"
+            # Создаем заглушку
+            echo '{"stats":{"suites":0,"tests":0,"passes":0,"pending":0,"failures":0},"results":[]}' > cypress/results/results.json
           fi
-      # ⬆️⬆️⬆️ КОНЕЦ ШАГА ОТЛАДКИ ⬆️⬆️⬆️
 
-      - name: Send detailed Telegram notification
+      - name: Send Telegram notification
         if: always()
         env:
           BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          # Инициализируем переменные
-          TESTS_TOTAL=0
-          TESTS_PASSED=0
-          TESTS_FAILED=0
-
-          # Проверяем наличие файла
-          if [ -f "cypress/results/results.json" ]; then
-            echo "Файл найден, пытаемся парсить..."
-
-            # Выводим первые 100 символов для отладки
-            echo "=== Первые 100 символов файла ==="
-            head -c 100 "cypress/results/results.json"
-            echo ""
-
-            # Пробуем разные варианты парсинга
-            # 1. Стандартный Cypress JSON отчет
-            if jq -e '.stats' "cypress/results/results.json" > /dev/null 2>&1; then
-              echo "Найдена структура .stats"
-              TESTS_TOTAL=$(jq -r '.stats.tests // 0' "cypress/results/results.json")
-              TESTS_PASSED=$(jq -r '.stats.passes // 0' "cypress/results/results.json")
-              TESTS_FAILED=$(jq -r '.stats.failures // 0' "cypress/results/results.json")
-
-            # 2. Альтернативная структура (массив)
-            elif jq -e '.[0]' "cypress/results/results.json" > /dev/null 2>&1; then
-              echo "Найдена структура массива"
-              TESTS_TOTAL=$(jq -r '[.[] | .stats.tests] | add // 0' "cypress/results/results.json")
-              TESTS_PASSED=$(jq -r '[.[] | .stats.passes] | add // 0' "cypress/results/results.json")
-              TESTS_FAILED=$(jq -r '[.[] | .stats.failures] | add // 0' "cypress/results/results.json")
-
-            # 3. Простая структура
-            else
-              echo "Пробуем простую структуру"
-              TESTS_TOTAL=$(jq -r '.total // .tests // 0' "cypress/results/results.json")
-              TESTS_PASSED=$(jq -r '.passed // .passes // 0' "cypress/results/results.json")
-              TESTS_FAILED=$(jq -r '.failed // .failures // 0' "cypress/results/results.json")
-            fi
-
-            echo "Результаты парсинга: Всего=$TESTS_TOTAL, Пройдено=$TESTS_PASSED, Упало=$TESTS_FAILED"
-          else
-            echo "Файл результатов не найден"
+          # Всегда проверяем что файл существует и не пустой
+          if [ ! -f "cypress/results/results.json" ] || [ ! -s "cypress/results/results.json" ]; then
+            echo '{"stats":{"suites":0,"tests":0,"passes":0,"pending":0,"failures":0},"results":[]}' > cypress/results/results.json
           fi
-
-          # Проверяем, что значения числовые
+          
+          # Парсим результаты
+          echo "=== Парсим JSON ==="
+          cat cypress/results/results.json
+          
+          # Mochawesome структура
+          if jq -e '.stats' "cypress/results/results.json" > /dev/null 2>&1; then
+            TESTS_TOTAL=$(jq -r '.stats.tests // 0' "cypress/results/results.json")
+            TESTS_PASSED=$(jq -r '.stats.passes // 0' "cypress/results/results.json")
+            TESTS_FAILED=$(jq -r '.stats.failures // 0' "cypress/results/results.json")
+            echo "Mochawesome: Всего=$TESTS_TOTAL, Пройдено=$TESTS_PASSED, Упало=$TESTS_FAILED"
+          else
+            # Альтернативные форматы
+            TESTS_TOTAL=$(jq -r '.total // .tests // 0' "cypress/results/results.json")
+            TESTS_PASSED=$(jq -r '.passed // .passes // 0' "cypress/results/results.json")
+            TESTS_FAILED=$(jq -r '.failed // .failures // 0' "cypress/results/results.json")
+            echo "Другой формат: Всего=$TESTS_TOTAL, Пройдено=$TESTS_PASSED, Упало=$TESTS_FAILED"
+          fi
+          
+          # Обеспечиваем числовые значения
           TESTS_TOTAL=${TESTS_TOTAL:-0}
           TESTS_PASSED=${TESTS_PASSED:-0}
           TESTS_FAILED=${TESTS_FAILED:-0}
-
-          # Преобразуем в числа (на всякий случай)
+          
           TESTS_TOTAL=$((TESTS_TOTAL))
           TESTS_PASSED=$((TESTS_PASSED))
           TESTS_FAILED=$((TESTS_FAILED))
-
-          # Рассчитываем процент только если есть тесты
+          
+          # Формируем сообщение
+          MESSAGE="🧪 <b>Cypress Tests Report</b>
+          ==============================
+          📦 Репозиторий: ${{ github.repository }}
+          🌿 Ветка: ${{ github.ref_name }}
+          👤 Автор: ${{ github.actor }}
+          
+          📊 <b>Результаты тестов:</b>
+          ✅ Пройдено: $TESTS_PASSED
+          ❌ Упало: $TESTS_FAILED
+          📈 Всего тестов: $TESTS_TOTAL"
+          
+          # Добавляем процент успеха если есть тесты
           if [ $TESTS_TOTAL -gt 0 ]; then
             PERCENTAGE=$((TESTS_PASSED * 100 / TESTS_TOTAL))
-            PROGRESS_BAR="$(
+            MESSAGE="$MESSAGE
+            🎯 Успешность: $PERCENTAGE%"
+          
+            # Прогресс бар
+            MESSAGE="$MESSAGE
+            📈 Прогресс: [$(
               for i in $(seq 1 10); do
                 if [ $((i*10)) -le $PERCENTAGE ]; then
                   echo "█"
@@ -135,59 +140,30 @@ jobs:
                   echo "░"
                 fi
               done | tr -d '\n'
-            )"
-          else
-            PERCENTAGE=0
-            PROGRESS_BAR="░░░░░░░░░░"
-            TESTS_TOTAL="Нет данных"
+            )]"
           fi
-
-          # Формируем сообщение
-          MESSAGE="🧪 <b>Детальный отчет Cypress Tests</b>
-          ==============================
-          📦 Репозиторий: ${{ github.repository }}
-          🌿 Ветка: ${{ github.ref_name }}
-          👤 Автор: ${{ github.actor }}
-
-          📊 <b>Результаты тестов:</b>
-          ✅ Пройдено: $TESTS_PASSED из $TESTS_TOTAL
-          ❌ Упало: $TESTS_FAILED из $TESTS_TOTAL"
-
-          if [ "$TESTS_TOTAL" != "Нет данных" ] && [ $TESTS_TOTAL -gt 0 ]; then
-            MESSAGE="$MESSAGE
-
-          📈 Прогресс: [$PROGRESS_BAR] $PERCENTAGE%"
-          fi
-
-          # Добавляем упавшие тесты если есть
-          if [ $TESTS_FAILED -gt 0 ] && [ -f "cypress/results/results.json" ]; then
-            # Пытаемся получить имена упавших тестов
+          
+          # Добавляем информацию о упавших тестах
+          if [ $TESTS_FAILED -gt 0 ]; then
             FAILED_TESTS=$(jq -r '
-              if .stats then
-                # Структура со stats
-                [.results[].suites[].tests[] | select(.fail == true) | .title] | join("\n")
-              elif .[0] then
-                # Массивовая структура
-                [.[].results[].suites[].tests[] | select(.state == "failed") | .title] | join("\n")
-              else
-                "Не удалось извлечь список тестов"
-              end
-            ' "cypress/results/results.json" 2>/dev/null || echo "Ошибка при получении списка")
-
+              [.results[].suites[].tests[] | select(.fail == true or .state == "failed") | .title]
+              | join("\n• ")
+            ' "cypress/results/results.json" 2>/dev/null || echo "Не удалось получить список")
+          
             if [ -n "$FAILED_TESTS" ] && [ "$FAILED_TESTS" != "" ]; then
               MESSAGE="$MESSAGE
-
-          🔥 <b>Упавшие тесты:</b>
-          $FAILED_TESTS"
+          
+            🔥 <b>Упавшие тесты:</b>
+            • $FAILED_TESTS"
             fi
           fi
-
+          
           MESSAGE="$MESSAGE
-
+          
           ------------------------
           🔗 Детали: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-
-          # Отправляем сообщение в Telegram
+          
+          # Отправляем сообщение
           curl -s -X POST \
             https://api.telegram.org/bot$BOT_TOKEN/sendMessage \
             -d chat_id=$CHAT_ID \
