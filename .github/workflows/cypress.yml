@@ -40,7 +40,7 @@ jobs:
           browser: chrome
           # Вариант 1: С mochawesome (лучший)
           command: npx cypress run --reporter mochawesome --reporter-options reportDir=cypress/results,overwrite=true,html=false,json=true
-          # Или вариант 2: С json reporter.
+          # Или вариант 2: С json reporter..
           # command: npx cypress run --reporter json --reporter-options output=cypress/results/results.json
         env:
           NODE_OPTIONS: "--max-old-space-size=4096"
