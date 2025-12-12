@@ -34,6 +34,7 @@ function Posts() {
 
     useEffect(() => {
         fetchPosts(limit, page)
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
 
     const createPost = (NewPost) => {

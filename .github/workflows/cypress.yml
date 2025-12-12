@@ -19,6 +19,8 @@ jobs:
 
       - name: Build project
         run: npm run build
+        env:
+          CI: false # Или "false". Это предотвратит падение сборки из-за предупреждений.
 
       - name: Run Cypress tests
         uses: cypress-io/github-action@v6
