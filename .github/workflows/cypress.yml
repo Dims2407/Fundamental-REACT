@@ -23,7 +23,7 @@ jobs:
           CI: false
 
       - name: Install jq for JSON parsing
-        run: sudo apt-get install -y jq  # ⬅ Установка jq
+        run: sudo apt-get install -y jq
 
       - name: Run Cypress tests with JSON report
         uses: cypress-io/github-action@v6
@@ -32,37 +32,39 @@ jobs:
           start: npm start
           wait-on: 'http://localhost:3000'
           browser: chrome
-          command: npm run test:e2e  # ⬅️ Используем ваш новый скрипт
+          command: npm run test:e2e
 
+      # ⬇️⬇️⬇️ ДОБАВЬТЕ ЭТОТ ШАГ ОТЛАДКИ ЗДЕСЬ ⬇️⬇️⬇️
       - name: Debug JSON structure
-          if: always()
-          run: |
-            echo "=== Полный путь к файлу ==="
-            pwd
-            find . -name "results.json" -type f
-            
-            echo "=== Проверяем папку cypress ==="
-            ls -la cypress/ 2>/dev/null || echo "Папка cypress не найдена"
-            ls -la cypress/results/ 2>/dev/null || echo "Папка results не найдена"
-            
-            echo "=== Содержимое results.json ==="
-            if [ -f "cypress/results/results.json" ]; then
-              echo "Размер файла: $(wc -l < "cypress/results/results.json") строк"
-              echo "Размер в байтах: $(wc -c < "cypress/results/results.json")"
-              echo "=== Первые 10 строк ==="
-              head -n 10 "cypress/results/results.json"
-              echo "=== Последние 10 строк ==="
-              tail -n 10 "cypress/results/results.json"
-              echo "=== Попытка парсинга через jq ==="
-              jq -r '.' "cypress/results/results.json" 2>/dev/null | head -n 50 || echo "jq не смог распарсить файл"
-              echo "=== Ключи в JSON ==="
-              jq -r 'keys[]' "cypress/results/results.json" 2>/dev/null || echo "Не удалось получить ключи"
-            else
-              echo "Файл cypress/results/results.json не найден!"
-              # Ищем другие возможные файлы
-              echo "=== Ищем все JSON файлы в проекте ==="
-              find . -name "*.json" -type f | grep -i "result\|report\|test" | head -20
-            fi
+        if: always()
+        run: |
+          echo "=== Полный путь к файлу ==="
+          pwd
+          find . -name "results.json" -type f
+          
+          echo "=== Проверяем папку cypress ==="
+          ls -la cypress/ 2>/dev/null || echo "Папка cypress не найдена"
+          ls -la cypress/results/ 2>/dev/null || echo "Папка results не найдена"
+          
+          echo "=== Содержимое results.json ==="
+          if [ -f "cypress/results/results.json" ]; then
+            echo "Размер файла: $(wc -l < "cypress/results/results.json") строк"
+            echo "Размер в байтах: $(wc -c < "cypress/results/results.json")"
+            echo "=== Первые 10 строк ==="
+            head -n 10 "cypress/results/results.json"
+            echo "=== Последние 10 строк ==="
+            tail -n 10 "cypress/results/results.json"
+            echo "=== Попытка парсинга через jq ==="
+            jq -r '.' "cypress/results/results.json" 2>/dev/null | head -n 50 || echo "jq не смог распарсить файл"
+            echo "=== Ключи в JSON ==="
+            jq -r 'keys[]' "cypress/results/results.json" 2>/dev/null || echo "Не удалось получить ключи"
+          else
+            echo "Файл cypress/results/results.json не найден!"
+            # Ищем другие возможные файлы
+            echo "=== Ищем все JSON файлы в проекте ==="
+            find . -name "*.json" -type f | grep -i "result\|report\|test" | head -20
+          fi
+      # ⬆️⬆️⬆️ КОНЕЦ ШАГА ОТЛАДКИ ⬆️⬆️⬆️
 
       - name: Send detailed Telegram notification
         if: always()
