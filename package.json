@@ -20,7 +20,7 @@
     "test": "react-scripts test",
     "eject": "react-scripts eject",
     "cy:open": "cypress open",
-    "cy:run": "cypress run --reporter json --reporter-options output=cypress/results/results.json",
+    "cy:run": "cypress run --reporter mochawesome --reporter-options reportDir=cypress/results,overwrite=false,html=false,json=true",
     "test:e2e": "start-server-and-test start http://localhost:3000 cy:run",
     "test:e2e:dev": "start-server-and-test dev http://localhost:3000 cy:run"
   },
@@ -44,6 +44,9 @@
   },
   "devDependencies": {
     "cypress": "^15.7.1",
+    "mochawesome": "^7.1.4",
+    "mochawesome-merge": "^5.1.0",
+    "mochawesome-report-generator": "^6.3.2",
     "start-server-and-test": "^2.0.0"
   }
 }
