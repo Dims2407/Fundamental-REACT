@@ -40,28 +40,48 @@ jobs:
           BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          # Проверяем наличие файла результатов
-          if [ -f "cypress/results/results.json" ]; then
-            # Парсим результаты тестов
-            TESTS_TOTAL=$(jq -r '.total' cypress/results/results.json)
-            TESTS_PASSED=$(jq -r '.passed' cypress/results/results.json)
-            TESTS_FAILED=$(jq -r '.failed' cypress/results/results.json)
-          
-            # Формируем сообщение
-            MESSAGE="🧪 <b>Детальный отчет Cypress Tests</b>
-            ==============================
-            📦 Репозиторий: ${{ github.repository }}
-            🌿 Ветка: ${{ github.ref_name }}
-            👤 Автор: ${{ github.actor }}
-          
-            📊 <b>Результаты тестов:</b>
-            ✅ Пройдено: $TESTS_PASSED из $TESTS_TOTAL
-            ❌ Упало: $TESTS_FAILED из $TESTS_TOTAL"
-          
-            # Добавляем прогресс-бар
+          # Проверяем разные возможные пути к файлу результатов
+          RESULT_FILE=""
+
+          for file in "cypress/results/results.json" "cypress/reports/results.json" "test-results.json" "cypress.json"; do
+            if [ -f "$file" ]; then
+              RESULT_FILE="$file"
+              echo "Найден файл результатов: $RESULT_FILE"
+              break
+            fi
+          done
+
+          if [ -n "$RESULT_FILE" ]; then
+            echo "=== Содержимое JSON файла ==="
+            cat "$RESULT_FILE" | jq '.' | head -50
+
+            # Пробуем разные варианты парсинга структуры JSON
+            # Вариант 1: Стандартная структура mochawesome
+            TESTS_TOTAL=$(jq -r '.stats.tests // .total // 0' "$RESULT_FILE" 2>/dev/null || echo "0")
+            TESTS_PASSED=$(jq -r '.stats.passes // .passed // 0' "$RESULT_FILE" 2>/dev/null || echo "0")
+            TESTS_FAILED=$(jq -r '.stats.failures // .failed // 0' "$RESULT_FILE" 2>/dev/null || echo "0")
+
+            echo "Статистика: Всего=$TESTS_TOTAL, Пройдено=$TESTS_PASSED, Упало=$TESTS_FAILED"
+
+            # Если не удалось получить данные, пробуем альтернативный способ
+            if [ "$TESTS_TOTAL" = "0" ] || [ "$TESTS_TOTAL" = "null" ]; then
+              echo "Пробуем альтернативный парсинг..."
+              # Ищем в массиве результатов
+              TESTS_TOTAL=$(jq -r '[.[] | .stats.tests] | add // 0' "$RESULT_FILE" 2>/dev/null || echo "0")
+              TESTS_PASSED=$(jq -r '[.[] | .stats.passes] | add // 0' "$RESULT_FILE" 2>/dev/null || echo "0")
+              TESTS_FAILED=$(jq -r '[.[] | .stats.failures] | add // 0' "$RESULT_FILE" 2>/dev/null || echo "0")
+            fi
+          else
+            echo "Файл результатов не найден"
+            TESTS_TOTAL="N/A"
+            TESTS_PASSED="N/A"
+            TESTS_FAILED="N/A"
+          fi
+
+          # Формируем сообщение с проверкой значений
+          if [ "$TESTS_TOTAL" != "N/A" ] && [ "$TESTS_TOTAL" != "null" ] && [ "$TESTS_TOTAL" != "0" ]; then
             PERCENTAGE=$((TESTS_PASSED * 100 / TESTS_TOTAL))
-            MESSAGE="$MESSAGE
-            📈 Прогресс: [$(
+            PROGRESS_BAR="$(
               for i in $(seq 1 10); do
                 if [ $((i*10)) -le $PERCENTAGE ]; then
                   echo "█"
@@ -69,33 +89,24 @@ jobs:
                   echo "░"
                 fi
               done | tr -d '\n'
-            )] $PERCENTAGE%"
-          
-            if [ $TESTS_FAILED -gt 0 ]; then
-              # Получаем список упавших тестов
-              FAILED_TESTS=$(jq -r '.failures[] | .title' cypress/results/results.json 2>/dev/null || echo "Не удалось получить список")
-              MESSAGE="$MESSAGE
-          
-            🔥 <b>Упавшие тесты:</b>
-            $FAILED_TESTS"
-            fi
-          
+            )"
           else
-            # Если файла с результатами нет
-            MESSAGE="🧪 <b>Cypress Tests Results</b>
-            ========================
-            📦 Репозиторий: ${{ github.repository }}
-            🌿 Ветка: ${{ github.ref_name }}
-          
-            ⚠️ Файл с результатами не найден
-            Статус: ${{ job.status }}"
+            PERCENTAGE=0
+            PROGRESS_BAR="░░░░░░░░░░"
           fi
-          
-          MESSAGE="$MESSAGE
-          
-          ------------------------
-          🔗 Детали: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          
+
+          MESSAGE="🧪 <b>Детальный отчет Cypress Tests</b>
+          ==============================
+          📦 Репозиторий: ${{ github.repository }}
+          🌿 Ветка: ${{ github.ref_name }}
+          👤 Автор: ${{ github.actor }}
+
+          📊 <b>Результаты тестов:</b>
+          ✅ Пройдено: $TESTS_PASSED из $TESTS_TOTAL
+          ❌ Упало: $TESTS_FAILED из $TESTS_TOTAL
+
+          📈 Прогресс: [$PROGRESS_BAR] $PERCENTAGE%"
+
           # Отправляем сообщение в Telegram
           curl -s -X POST \
             https://api.telegram.org/bot$BOT_TOKEN/sendMessage \
