@@ -20,7 +20,7 @@ jobs:
       - name: Build project
         run: npm run build
         env:
-          CI: false # Или "false". Это предотвратит падение сборки из-за предупреждений.
+          CI: false
 
       - name: Run Cypress tests
         uses: cypress-io/github-action@v6
@@ -30,21 +30,21 @@ jobs:
           wait-on: 'http://localhost:3000'
           browser: chrome
 
-  - name: Send Telegram notification
-    if: always() # Отправлять всегда, даже если тесты упали
-    uses: appleboy/telegram-action@master
-    with:
-      to: ${{ secrets.TELEGRAM_CHAT_ID }}
-      token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-      message: |
-        🧪 Cypress Tests Results
-        ========================
-        Repository: ${{ github.repository }}
-        Branch: ${{ github.ref_name }}
-        Commit: ${{ github.sha }}
-        Author: ${{ github.actor }}
-        Status: ${{ job.status }}
-        Workflow: ${{ github.workflow }}
-        Result: ${{ job.status == 'success' && '✅ PASSED' || '❌ FAILED' }}
-        ------------------------
-        View Details: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      - name: Send Telegram notification
+        if: always()
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_CHAT_ID }}
+          token: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          message: |
+            🧪 Cypress Tests Results
+            ========================
+            Repository: ${{ github.repository }}
+            Branch: ${{ github.ref_name }}
+            Commit: ${{ github.sha }}
+            Author: ${{ github.actor }}
+            Status: ${{ job.status }}
+            Workflow: ${{ github.workflow }}
+            Result: ${{ job.status == 'success' && '✅ PASSED' || '❌ FAILED' }}
+            ------------------------
+            View Details: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
